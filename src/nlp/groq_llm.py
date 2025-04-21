@@ -1,77 +1,76 @@
-# src/nlp/groq_llm.py
 import json
+import time
 import streamlit as st
 from typing import Dict
 from src.utils.config import GROQ_API_KEY
 from langchain import LLMChain, PromptTemplate
 from langchain_groq import ChatGroq
 
-
 def refine_extraction(text: str, initial_data: Dict) -> Dict:
     """
     Refina la extracción de información para la propuesta comercial de Seidor.
-    Utiliza LangChain con el modelo Groq para extraer y preparar dos secciones:
-      1. Suscripciones (imagen 1).
-      2. Implementación (imagen 2).
-    Devuelve solo un JSON con las claves requeridas.
+    Incorpora texto base de especificaciones (Monday Product Spec) junto con transcripciones.
+    Extrae y prepara dos secciones: Suscripciones e Implementación.
+    Implementa reintentos con back-off en caso de errores 503.
     """
-    # Prompt actualizado sin calcular IVA, solo se indica "+ IVA" y escapando llaves literales
     template = """
 Eres un asistente experto en generación de propuestas comerciales para Seidor, en español.
-Tu tarea es analizar el texto transcrito de reuniones y extraer / calcular toda la información necesaria para rellenar dos secciones de la propuesta:
+Tienes **información base** de productos Monday.com (precios, características, usos) proveniente de un PDF estático incluido en el proyecto.
+Cuando proceses las distintas fuentes de información (audio, video, PDF, DOCX, ingreso manual), debes combinar las necesidades concretas del cliente con esa información base.
 
-1. Suscripciones:
-   - Lista únicamente los productos que el cliente ha solicitado (1 a 4).
-   - Para cada producto, indica:
-     * producto: Work Management, CRM, Dev o Service.
-     * detalle: calcula (precio por usuario) × (número de usuarios) × 12 meses.
-     * monto_total_anual: muestra el resultado del cálculo seguido de ' + IVA'.
-   - total_suscripciones_anual: suma de cada monto_total_anual (sin calcular IVA), seguido de ' + IVA'.
+Tienes **información base** de productos Monday.com, seguida del texto transcrito de la reunión.
 
-2. Implementación:
-   - Extrae horas_de_implementacion (número de horas) y duracion_proyecto_implementacion (en semanas).
-   - En la diapositiva de implementación reporta:
+### Información base de productos:
+{text}
+
+### Datos de cliente (transcripción + NER preliminar):
+Datos iniciales:
+{initial_data}
+
+### Tareas:
+1. **Suscripciones:**
+   - Lista productos solicitados (1–4).
+   - Para cada uno:
+     - producto: Work Management, CRM, Dev o Service.
+     - detalle: (precio usuario)×(usuarios)×12 meses.
+     - monto_total_anual: «<valor> + IVA».
+   - total_suscripciones_anual: suma de cada monto_total_anual + IVA.
+
+2. **Implementación:**
+   - Solo rellena **horas_de_implementacion** y **duracion_proyecto_implementacion** si en la reunión o documentación se mencionaron explícitamente horas o duración del proyecto.
+   - Si no se mencionan estos detalles, deja ambos campos como cadena vacía.
+   - Cuando apliquen, reporta:
      * servicio: 'Proyecto de Implementación'.
      * duracion: 'X horas / Y semanas'.
      * valor: '1.5 UF / Hora'.
-     * monto_implementacion_anual: muestra 'horas_de_implementacion × 1.5 UF + IVA'.
+     * monto_implementacion_anual: 'horas×1.5 UF + IVA'.
 
-Instrucciones generales:
-- Si no encuentras un dato, deja el campo como cadena vacía ''.
-- El campo 'emails' se mantiene siempre vacío.
+**Instrucciones:**
+- Deja campos no encontrados como "".
+- emails siempre vacío.
 
-Devuelve solo un bloque JSON con estas claves exactas:
+Devuelve **solo** un JSON con estas claves:
 ```json
 {{
   "nombre_empresa": "",
   "descripcion_empresa": "",
-  "requerimientos_y_desafios": [],  # lista de puntos
+  "requerimientos_y_desafios": [],
   "cantidad_licencias": "",
   "vigencia_contrato": "",
   "tipo_licencia": [],
-  "suscripciones": [  # array de objetos por producto
-    {{
-      "producto": "",
-      "detalle": "",
-      "monto_total_anual": "<valor> + IVA"
-    }}
+  "suscripciones": [
+    {{"producto":"","detalle":"","monto_total_anual":"<valor> + IVA"}}
   ],
   "total_suscripciones_anual": "<suma> + IVA",
   "horas_implementacion": "",
   "duracion_proyecto_implementacion": "",
-  "monto_implementacion_anual": "<horas> × 1.5 UF/horas + IVA",
+  "monto_implementacion_anual": "<horas> × 1.5 UF + IVA",
   "emails": ""
 }}```
 
-Datos iniciales:
-{initial_data}
-
-Texto completo:
-{text}
+Texto combinado: tras información base y datos iniciales.
 """
-    prompt = PromptTemplate(template=template, input_variables=["initial_data", "text"])
-
-    # Configura el LLM de Groq
+    prompt = PromptTemplate(template=template, input_variables=["initial_data","text"])
     llm = ChatGroq(
         groq_api_key=GROQ_API_KEY,
         model_name="meta-llama/llama-4-maverick-17b-128e-instruct",
@@ -79,20 +78,31 @@ Texto completo:
     )
     chain = LLMChain(llm=llm, prompt=prompt)
 
-    try:
-        # Ejecuta la cadena con datos iniciales y texto
-        generated = chain.run(
-            initial_data=json.dumps(initial_data, ensure_ascii=False),
-            text=text
-        )
-        # Extraer bloque JSON de la respuesta
-        start = generated.find("{")
-        end = generated.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            json_str = generated[start:end+1]
-            return json.loads(json_str)
-        else:
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            generated = chain.run(
+                initial_data=json.dumps(initial_data, ensure_ascii=False),
+                text=text
+            )
+            start = generated.find("{")
+            end = generated.rfind("}")
+            if start != -1 and end > start:
+                return json.loads(generated[start:end+1])
             return initial_data
-    except Exception as e:
-        st.error(f"Error refinando extracción con Groq LLMChain: {e}")
-        return initial_data
+
+        except Exception as e:
+            msg = str(e)
+            # Si es un 503 o Service Unavailable, reintenta
+            if "503" in msg or "Service Unavailable" in msg:
+                wait = 2 ** attempt
+                st.warning(f"Groq no disponible (intento {attempt}/{max_attempts}), reintentando en {wait}s...")
+                time.sleep(wait)
+                continue
+            # Otro error: termina y retorna preliminares
+            st.error(f"Error inesperado en LLMChain: {e}")
+            return initial_data
+
+    st.error("El servicio de extracción LLM no está disponible tras varios intentos; usando datos preliminares.")
+    return initial_data
+
