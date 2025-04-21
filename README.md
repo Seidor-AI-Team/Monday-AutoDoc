@@ -1,86 +1,73 @@
-# AutoPropuestasMVP
+# Extracción de Variables - AUTODOC MONDAY
 
-**AutoPropuestasMVP** es un MVP construido con **Streamlit**, **LangChain + Groq**, y **python-pptx**, diseñado para automatizar la creación de propuestas comerciales para el equipo de ventas de Monday.
-
----
-
-## Características
-
-- **Subida de archivos**: audio, video (se extrae audio), PDF, Word, Excel.  
-- **Transcripción**: convierte audio/video a texto (Whisper).  
-- **Extracción de entidades**: NER con SpaCy (`EntityRuler`) para detección preliminar.  
-- **Refinamiento LLM**: LangChain + Groq para mapear y calcular datos clave.  
-- **Generación de PPT**: reemplaza placeholders `{{campo}}` en plantilla con datos extraídos.  
-- **Cálculos avanzados**: detalle y totales de suscripciones, horas y costos de implementación.
-
-
-
-## Uso
-
-1. Ejecuta la app Streamlit:
-   ```bash
-   streamlit run main.py
-   ```
-2. En la interfaz web:
-   - Sube audio/video o documentos.  
-   - Visualiza la **Extracción preliminar** (SpaCy).  
-   - Pulsa **Refinar con LLM** para ver el JSON mapeado.  
-   - Haz clic en **Generar PPT** para descargar tu propuesta.
+**AUTODOC MONDAY** es una aplicación Streamlit para automatizar la extracción de variables clave de propuestas comerciales basadas en información inicial (especificaciones de productos de Monday.com) y datos de reuniones o documentos (audio, video, PDF, DOCX o texto manual).
 
 ---
 
-## Detalle de Pipelines
+## Objetivo
 
-### src/ingestion
-- **audio_extractor.py**: extrae y transcribe audio.  
-- **video_processor.py**: extrae audio de video.  
-- **doc_extractor.py**: convierte PDF, DOCX y Excel a texto.
-
-### src/nlp
-- **entity_extraction.py**: NER con SpaCy y EntityRuler.  
-- **groq_llm.py**: LangChain + Groq para mapear y calcular datos clave.
-
-### src/generator
-- **ppt_generator.py**: reemplaza placeholders `{{campo}}` en la plantilla PPT.
-
-### src/utils
-- **file_utils.py**: creación de carpetas y guardado de JSON.
-
-### src/app
-- **streamlit_app.py**: interfaz de usuario y orquestación de pipelines.
+- **Enfoque actual** asegurar que todas las variables clave se extraigan correctamente antes de generar la propuesta final en PPT (esta funcionalidad está WIP y se añadirá una vez validada la extracción).
+- **Cargar** un PDF estático con las especificaciones de productos de Monday.com.
+- **Procesar** múltiples archivos (audio, video, PDF, DOCX) o texto manual.
+- **Combinar** la información base y el contenido extraído.
+- **Extraer** entidades y refinar variables clave mediante SpaCy + LangChain (Groq).
+- **Descargar** inmediatamente el JSON con las variables extraídas.
+- **Reiniciar** la aplicación tras cada descarga para nuevos procesos.
 
 ---
 
-## Ejemplo de JSON extraído
+## Características principales
 
-```json
-{
-  "nombre_empresa": "Cedar",
-  "descripcion_empresa": "",
-  "requerimientos_y_desafios": [],
-  "cantidad_licencias": "10",
-  "vigencia_contrato": "",
-  "tipo_licencia": [],
-  "suscripciones": [
-    { "producto": "Work Management", "detalle": "5 × $52 × 12", "monto_total_anual": "$3120 + IVA" },
-    { "producto": "Service", "detalle": "5 × $62 × 12", "monto_total_anual": "$3720 + IVA" }
-  ],
-  "total_suscripciones_anual": "$6840 + IVA",
-  "horas_implementacion": "40",
-  "duracion_proyecto_implementacion": "8 semanas",
-  "monto_implementacion_anual": "40 × 1.5 UF + IVA",
-  "emails": ""
-}
+1. **Carga múltiple de archivos**: acepta audio (`.mp3`, `.wav`), video (`.mp4`, `.mov`, `.avi`), PDF y DOCX en una sola operación.
+2. **Información base**: incluye un PDF con precios y características de los productos Monday.com.
+3. **Ingestión y transcripción**:
+   - Audio → Speech-to-Text.
+   - Video → extracción de audio y transcripción.
+   - PDF/DOCX → extracción de texto.
+   - Texto manual → ingreso directo.
+4. **Extracción preliminar**: reconocimiento de entidades con SpaCy (`EntityRuler`).
+5. **Refinamiento LLM**: LangChain + Groq con reintentos y back-off ante errores 503.
+6. **Lógica condicional**: solo rellena horas y duración de implementación si se mencionaron explícitamente.
+7. **Descarga inmediata**: botón para bajar el JSON de variables y limpiar el estado de la app.
+
+---
+
+
+
+Instalar con:
+```bash
+pip install -r requirements.txt
+python -m spacy download es_core_news_md
 ```
 
 ---
 
+## Configuración
 
+1. `.env` en tu entorno:
+   ```env
+   GROQ_API_KEY=tu_groq_api_key
+   GROQ_ENDPOINT=https://api.groq.ai/v1/chat/completions
+   ```
+2. Asegúrate de tener `ffmpeg` instalado y accesible en PATH.
 
+---
 
-## Notas
-- Usar versión de Python < 3.13 (Acá se usó 3.12)
-- Asegúrate de tener instalado el modelo de spaCy para español:  
-  `python -m spacy download es_core_news_md`
+## Cómo ejecutar
+
+Desde la raíz del proyecto:
+```bash
+streamlit run main.py
+```
+
+1. **Sube** uno o varios archivos en el componente de carga.
+2. Observa el **texto combinado** (especificaciones + entrada).
+3. Revisa la **extracción preliminar** y el **JSON refinado**.
+4. Haz clic en **"Descargar variables extraídas (JSON)"** para obtener el archivo.
+
+Para **texto manual**, deja el área de carga vacía, escribe en el campo manual y pulsa **"Procesar manualmente"**.
+
+---
+
 
 
